@@ -1,35 +1,18 @@
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field
-
-class HotspotGeometry(BaseModel):
-    type: Literal["Point"] = "Point"
-    coordinates: List[float] = Field(..., description="[longitude, latitude]")
-
-class HotspotProperties(BaseModel):
-    id: int
-    latitude: float
-    longitude: float
-    brightness: float
-    acq_date: str
-    acq_time: str
-    confidence: str
-    frp: float
-
-class HotspotFeature(BaseModel):
-    type: Literal["Feature"] = "Feature"
-    geometry: HotspotGeometry
-    properties: HotspotProperties
-
-class HotspotFeatureCollection(BaseModel):
-    type: Literal["FeatureCollection"] = "FeatureCollection"
-    features: List[HotspotFeature]
 
 class HotspotApiResponse(BaseModel):
     status: str = "success"
-    count: int
-    totalCount: int
-    source: str
-    data: HotspotFeatureCollection
+    count: int = Field(..., description="Total number of returned hotspot points")
+    columns: List[str] = Field(
+        default=["lat", "lng", "brightness", "frp", "confidence", "acq_date", "acq_time"],
+        description="Ordered column names of each row in the data matrix"
+    )
+    data: List[List[Union[float, str, int, None]]] = Field(
+        ...,
+        description="Matrix of hotspots formatted as [[lat, lng, brightness, frp, confidence, acq_date, acq_time], ...]"
+    )
+    message: Optional[str] = None
 
 class HotspotStatsSummary(BaseModel):
     total_hotspots: int = 0
@@ -45,3 +28,8 @@ class HotspotStatsResponse(BaseModel):
     confidenceBreakdown: List[Dict[str, Any]]
     timeline: List[Dict[str, Any]]
     error: Optional[str] = None
+
+class HotspotSyncResponse(BaseModel):
+    status: str
+    message: str
+    synced_count: int

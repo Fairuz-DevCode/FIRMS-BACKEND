@@ -21,12 +21,11 @@ async def get_peatland_geojson_from_db(db: AsyncSession) -> Dict[str, Any]:
                     jsonb_agg(
                         jsonb_build_object(
                             'type', 'Feature',
-                            'geometry', ST_AsGeoJSON(geom)::jsonb,
+                            'geometry', ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.002))::jsonb,
                             'properties', jsonb_build_object(
                                 'ogc_fid', ogc_fid,
                                 'objectid', objectid,
                                 'layer_revi', layer_revi,
-                                'shape_length', shape_length,
                                 'shape_area', shape_area
                             )
                         )
@@ -40,7 +39,7 @@ async def get_peatland_geojson_from_db(db: AsyncSession) -> Dict[str, Any]:
         geojson = result.scalar()
 
         if geojson and isinstance(geojson, dict):
-            cache.set(cache_key, geojson, 300)
+            cache.set(cache_key, geojson, DEFAULT_CACHE_TTL if 'DEFAULT_CACHE_TTL' in globals() else 86400)
             return geojson
 
         return {"type": "FeatureCollection", "features": []}

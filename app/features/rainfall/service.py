@@ -1,103 +1,90 @@
-import os
 from typing import Dict, Any, Optional, List
-import pandas as pd
-import numpy as np
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.utils.cache import cache
 
 class RainfallService:
-    _df_cache: Optional[pd.DataFrame] = None
+    @classmethod
+    async def get_rainfall_grid_from_db(cls, db: AsyncSession, limit: int = 3000) -> Dict[str, Any]:
+        """
+        Get latest rainfall grid and stats directly from PostGIS database.
+        """
+        cache_key = f"rainfall_grid_{limit}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            query = text("""
+                WITH latest AS (
+                    SELECT latitude, longitude, curah_hujan_mm
+                    FROM rainfall_data
+                    WHERE waktu = (SELECT MAX(waktu) FROM rainfall_data)
+                    LIMIT :limit
+                )
+                SELECT 
+                    json_agg(json_build_array(ROUND(latitude::numeric, 2), ROUND(longitude::numeric, 2), ROUND(curah_hujan_mm::numeric, 1))) as grid,
+                    (SELECT count(*) FROM latest) as total_count,
+                    (SELECT round(avg(curah_hujan_mm)::numeric, 1) FROM latest) as avg_val,
+                    (SELECT round(min(curah_hujan_mm)::numeric, 1) FROM latest) as min_val,
+                    (SELECT round(max(curah_hujan_mm)::numeric, 1) FROM latest) as max_val
+                FROM latest;
+            """)
+            result = await db.execute(query.bindparams(limit=limit))
+            row = result.first()
+            if row and row.grid:
+                res = {
+                    "status": "success",
+                    "total_records": row.total_count or 0,
+                    "summary": {
+                        "mean_rainfall_mm": float(row.avg_val or 3.2),
+                        "min_rainfall_mm": float(row.min_val or 0.0),
+                        "max_rainfall_mm": float(row.max_val or 25.0),
+                        "unit": "mm"
+                    },
+                    "data": row.grid
+                }
+                cache.set(cache_key, res, 3600)
+                return res
+        except Exception as e:
+            print(f"[RainfallService Error] {e}")
+
+        return {"status": "error", "data": []}
 
     @classmethod
-    def _load_data(cls) -> Optional[pd.DataFrame]:
-        if cls._df_cache is not None:
-            return cls._df_cache
-
-        paths = [
-            "/app/data/era5_clean.csv",
-            os.path.join(os.getcwd(), "data/era5_clean.csv"),
-            "/app/data/era5_hidrologi_indonesia.csv",
-            os.path.join(os.getcwd(), "data/era5_hidrologi_indonesia.csv"),
-        ]
-
-        for p in paths:
-            if os.path.exists(p):
-                try:
-                    df = pd.read_csv(p)
-                    col = "curah_hujan_mm" if "curah_hujan_mm" in df.columns else "tp_mm"
-                    if col in df.columns:
-                        cls._df_cache = df
-                        return cls._df_cache
-                except Exception as e:
-                    print(f"[RainfallService Error] Failed to load {p}: {e}")
-        return None
-
-    @classmethod
-    def get_rainfall_stats(cls, limit: int = 1000) -> Dict[str, Any]:
+    async def get_rainfall_at_point_from_db(cls, db: AsyncSession, lat: float, lon: float) -> Dict[str, Any]:
         """
-        Get precipitation / rainfall (curah hujan) statistics and grid points from ERA5 dataset.
+        Get nearest rainfall record at specified lat, lon using PostGIS KNN.
         """
-        df = cls._load_data()
-        if df is not None:
-            col = "curah_hujan_mm" if "curah_hujan_mm" in df.columns else "tp_mm"
-            sample = df.sample(min(limit, len(df))) if len(df) > limit else df
-
-            records = sample[["latitude", "longitude", col, "waktu" if "waktu" in sample.columns else "valid_time"]].rename(
-                columns={col: "rainfall_mm", "valid_time": "waktu"}
-            ).to_dict(orient="records")
-
-            return {
-                "status": "success",
-                "total_records": len(df),
-                "sample_size": len(records),
-                "summary": {
-                    "mean_rainfall_mm": round(float(df[col].mean()), 2),
-                    "min_rainfall_mm": round(float(df[col].min()), 2),
-                    "max_rainfall_mm": round(float(df[col].max()), 2),
-                    "total_rainfall_mm": round(float(df[col].sum()), 2),
+        try:
+            query = text("""
+                SELECT 
+                    ROUND(latitude::numeric, 4) as lat,
+                    ROUND(longitude::numeric, 4) as lon,
+                    ROUND(curah_hujan_mm::numeric, 1) as curah_hujan,
+                    waktu
+                FROM rainfall_data
+                WHERE waktu = (SELECT MAX(waktu) FROM rainfall_data)
+                ORDER BY geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)
+                LIMIT 1;
+            """)
+            result = await db.execute(query.bindparams(lat=lat, lon=lon))
+            row = result.first()
+            if row:
+                val = float(row.curah_hujan)
+                category = "Kering / Sangat Ringan" if val < 5 else ("Hujan Sedang" if val <= 20 else "Hujan Lebat")
+                return {
+                    "status": "success",
+                    "target_lat": lat,
+                    "target_lon": lon,
+                    "nearest_lat": float(row.lat),
+                    "nearest_lon": float(row.lon),
+                    "rainfall_mm": val,
+                    "category": category,
+                    "timestamp": str(row.waktu),
                     "unit": "mm"
-                },
-                "data": records
-            }
+                }
+        except Exception as e:
+            print(f"[Rainfall Point Error] {e}")
 
-        return {
-            "status": "simulated",
-            "total_records": 100,
-            "sample_size": 10,
-            "summary": {
-                "mean_rainfall_mm": 5.2,
-                "min_rainfall_mm": 0.0,
-                "max_rainfall_mm": 45.0,
-                "unit": "mm"
-            },
-            "data": []
-        }
-
-    @classmethod
-    def get_rainfall_at_point(cls, lat: float, lon: float) -> Dict[str, Any]:
-        """
-        Get nearest rainfall record at specified lat, lon.
-        """
-        df = cls._load_data()
-        if df is not None:
-            col = "curah_hujan_mm" if "curah_hujan_mm" in df.columns else "tp_mm"
-            dist = (df["latitude"] - lat)**2 + (df["longitude"] - lon)**2
-            nearest_idx = dist.idxmin()
-            row = df.loc[nearest_idx]
-
-            return {
-                "status": "success",
-                "target_lat": lat,
-                "target_lon": lon,
-                "nearest_lat": float(row["latitude"]),
-                "nearest_lon": float(row["longitude"]),
-                "rainfall_mm": round(float(row[col]), 2),
-                "timestamp": str(row.get("waktu", row.get("valid_time", ""))),
-                "unit": "mm"
-            }
-
-        return {
-            "status": "simulated",
-            "target_lat": lat,
-            "target_lon": lon,
-            "rainfall_mm": round(float(np.random.exponential(5.0)), 2),
-            "unit": "mm"
-        }
+        return {"status": "error", "target_lat": lat, "target_lon": lon}

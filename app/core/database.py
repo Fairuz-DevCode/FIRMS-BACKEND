@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.core.config import settings
 
-# Async Engine for FastAPI async endpoints
+# Async for fetch api key NASA 
 async_engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
     echo=False,

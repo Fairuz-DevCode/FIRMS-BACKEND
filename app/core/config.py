@@ -2,13 +2,15 @@ import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    PORT: int = int(os.getenv("PORT", "5000"))
-    DB_HOST: str = os.getenv("DB_HOST", "db")
-    DB_USER: str = os.getenv("DB_USER", "firms_user")
-    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "firms_password")
-    DB_NAME: str = os.getenv("DB_NAME", "firms_db")
-    DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
-    
+    PORT: int = 5000
+    DB_HOST: str = "db"
+    DB_PORT: int = 5432
+
+    DB_USER: str 
+    DB_PASSWORD: str 
+    DB_NAME: str 
+    MAP_KEY: str 
+
     @property
     def DATABASE_URL(self) -> str:
         env_url = os.getenv("DATABASE_URL")

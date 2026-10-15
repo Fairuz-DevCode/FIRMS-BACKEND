@@ -75,13 +75,12 @@ class LandCoverService:
             except Exception as e:
                 print(f"[LandCoverService Warning] Rasterio sampling fallback: {e}")
 
-        # Fallback simulated calculation based on coordinates
-        grid_sample = int(np.random.choice([1, 2, 4, 8, 9], p=[0.4, 0.25, 0.15, 0.1, 0.1]))
+        # No GeoTIFF covers this point or raster file is unavailable
         return {
             "lat": lat,
             "lon": lon,
-            "pixel_val": grid_sample,
-            "land_cover": LAND_COVER_CLASSES.get(grid_sample, "Unknown"),
-            "raster_file": "simulated",
-            "source": "simulated_rasterio_numpy"
+            "pixel_val": None,
+            "land_cover": "Data raster GeoTIFF lokal tidak tersedia untuk titik koordinat ini",
+            "raster_file": None,
+            "source": "none"
         }
